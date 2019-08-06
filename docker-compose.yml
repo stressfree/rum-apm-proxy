@@ -1,0 +1,12 @@
+version: "3"
+services:
+  proxy:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - APM_SERVICE_NAME=Test Proxy
+      - APM_SERVER_URL=http://localhost:8080
+      - APM_ENVIRONMENT=DEV
+      - APM_SERVER_INTAKE_URI=http://localhost:8200/intake
+      - PROXY_WEB_DOMAIN_URL=http://www.stress-free.co.nz/

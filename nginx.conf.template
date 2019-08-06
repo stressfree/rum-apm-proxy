@@ -1,0 +1,92 @@
+worker_processes auto;
+pid /tmp/nginx.pid;
+
+load_module modules/ngx_http_subs_filter_module.so;
+
+events {
+    worker_connections 768;
+}
+
+http {
+    # Set an array of temp and cache file options that will otherwise default to
+    # restricted locations accessible only to root.
+    client_body_temp_path /tmp/client_body;
+    fastcgi_temp_path /tmp/fastcgi_temp;
+    proxy_temp_path /tmp/proxy_temp;
+    scgi_temp_path /tmp/scgi_temp;
+    uwsgi_temp_path /tmp/uwsgi_temp;
+
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    types_hash_max_size 2048;
+
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+
+    access_log /var/log/nginx/access.log;
+    error_log /var/log/nginx/error.log;
+
+    gzip on;
+
+    server {
+        listen 8080 default_server;
+        listen [::]:8080 default_server;
+
+        root /var/www/html;
+
+        index index.html index.htm;
+
+        server_name _;
+
+        sub_filter '<head>' '
+        <script src="/_rum/elastic-apm-rum.umd.min.js"></script>
+        <script>
+            var pageName = window.location.pathname.replace(/[0-9]+/gi, "X");
+            elasticApm.init({
+                serviceName: "${APM_SERVICE_NAME}",
+                serverUrl: "${APM_SERVER_URL}",
+                environment: "${APM_ENVIRONMENT}",
+                active: true,
+                pageLoadTransactionName: pageName,
+            });
+            var apmVar = elasticApm.setInitialPageLoadName("Page Load : " + window.location.pathname);
+        </script>
+        <head>';
+        sub_filter_once on;
+
+        location /_rum {
+            try_files $uri $uri/ =404;
+        }
+
+        location /intake {
+            # Add CORS headers to the APM Server request
+            if ($request_method = 'OPTIONS') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET,POST,OPTIONS';
+                add_header 'Access-Control-Allow-Headers' 'Accept:,Accept-Encoding,Accept-Language:,Cache-Control,Connection,DNT,Pragma,Host,Referer,Upgrade-Insecure-Requests,User-Agent,elastic-apm-traceparent';
+                add_header 'Access-Control-Max-Age' 1728000;
+                add_header 'Access-Control-Allow-Credentials' 'true';
+                add_header 'Content-Type' 'text/plain; charset=utf-8';
+                add_header 'Content-Length' 0;
+                return 200;
+            }
+            if ($request_method = 'GET') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Credentials' 'true';
+            }
+             if ($request_method = 'POST') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Credentials' 'true';
+            }
+            proxy_pass ${APM_SERVER_INTAKE_URI};
+        }
+
+        location / {
+            proxy_pass ${PROXY_WEB_DOMAIN_URL};
+            # Disable GZIP data transfer as this interferes with the sub_filter
+            proxy_set_header Accept-Encoding "";
+        }
+    }
+}
